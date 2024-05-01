@@ -45,6 +45,7 @@ The get_cert function takes the following optional arguments:
 - force: Whether to force the certificate issuance even if the current certificate is still valid.
 - privkey_file_name: The name of the private key file.
 - cert_file_name: The name of the certificate file.
+- backup_time_format: Time format for backup directories.
 
 
 ## Example
