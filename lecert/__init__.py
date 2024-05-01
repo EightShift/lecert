@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 import shutil
@@ -12,6 +13,20 @@ from acme import challenges
 from acme import client
 from acme import crypto_util
 from acme import messages
+import logging
+
+
+logger = logging.getLogger('lecert')
+
+formatter = logging.Formatter(
+    '%(asctime)s (%(filename)s:%(lineno)d %(threadName)s) %(levelname)s - %(name)s: "%(message)s"'
+)
+
+console_output_handler = logging.StreamHandler(sys.stderr)
+console_output_handler.setFormatter(formatter)
+logger.addHandler(console_output_handler)
+
+logger.setLevel(logging.ERROR)
 
 
 KEY_SIZE = 2048
@@ -35,24 +50,31 @@ def _time_to_get_cert(cert_path, cert_lifetime):
 	return True
 
 
-def _backup_saving(file_path, data):
-	old_file_path = file_path + '.old'
-	if os.path.exists(file_path):
-		if os.path.exists(old_file_path):
-			os.remove(old_file_path)
+def _backup_saving(certs_dir, cert_name_data, privkey_name_data, backup_time_format='%Y-%m-%d_%H-%M-%S'):
+	current_datetime = datetime.now().strftime(backup_time_format)
+	created_datetime = None
 
-		os.rename(file_path, old_file_path)
+	backups_dir = os.path.join(certs_dir, 'backups')
+	os.makedirs(backups_dir, exist_ok=True)
 
-	try:
-		with open(file_path, 'w') as _file:
+	for name, data in (cert_name_data, privkey_name_data):
+		path = os.path.join(certs_dir, name)
+
+		if os.path.exists(path):
+			if not created_datetime:
+				created_datetime = datetime.fromtimestamp(os.path.getctime(path)).strftime(backup_time_format)
+			
+			backup_dir = os.path.join(backups_dir, f'{created_datetime}~{current_datetime}')
+			os.makedirs(backup_dir, exist_ok=True)
+
+			backup_path = os.path.join(backup_dir, path)
+			try:
+				shutil.move(path, backup_path)
+			except:
+				pass
+
+		with open(path, 'w') as _file:
 			_file.write(data)
-	except:
-		if os.path.exists(old_file_path):
-			os.rename(old_file_path, file_path)
-
-		return False
-	
-	return True
 
 
 def _select_http01_challb(auths):
@@ -82,15 +104,6 @@ def _accept_challenges(acme_challenge_dir, client_acme, order):
 		client_acme.answer_challenge(challb, response)
 
 
-def _save_cert(privkey_path, cert_path, privkey_pem, finalized_order):
-	if not _backup_saving(privkey_path, privkey_pem.decode()):  # saving privkey.pem file
-		return False
-
-	if not _backup_saving(cert_path, finalized_order.fullchain_pem): # saving cert.pem file
-		return False
-	
-	return True
-
 
 @contextmanager
 def _get_acme_challenge_dir(certs_dir):
@@ -119,7 +132,7 @@ def _get_client_acme(email):
 
 
 
-def get_cert(certs_dir, email, domains, www=True, cert_lifetime=30, timeout=150, force=False, privkey_file_name='privkey.pem', cert_file_name='cert.pem'):
+def get_cert(certs_dir, email, domains, www=True, cert_lifetime=30, timeout=150, force=False, privkey_file_name='privkey.pem', cert_file_name='cert.pem', backup_time_format='%Y-%m-%d_%H-%M-%S'):
 	"""Obtains a new certificate from Let's Encrypt.
 
 	Args:
@@ -132,14 +145,14 @@ def get_cert(certs_dir, email, domains, www=True, cert_lifetime=30, timeout=150,
 		force (bool): Whether to force the certificate issuance even if the current certificate is still valid.
 		privkey_file_name (str): The name of the private key file.
 		cert_file_name (str): The name of the certificate file.
+		backup_time_format (str): Time format for backup directories.
 
 	Returns:
 		bool: True if the certificate was obtained successfully, False otherwise.
 	"""
-	privkey_path = os.path.join(certs_dir, privkey_file_name)
+	
 	cert_path = os.path.join(certs_dir, cert_file_name)
-
-	if not force and not _time_to_get_cert(cert_path, cert_lifetime): # force or checking __created__ file
+	if not force and not _time_to_get_cert(cert_path, cert_lifetime): # force or checking file creation time
 		return
 
 	try:
@@ -160,6 +173,11 @@ def get_cert(certs_dir, email, domains, www=True, cert_lifetime=30, timeout=150,
 				# Wait for challenge status and then issue a certificate.
 				finalized_order = client_acme.poll_and_finalize(order, datetime.now() + timedelta(seconds=timeout))
 
-			return _save_cert(privkey_path, cert_path, privkey_pem, finalized_order)
-	except:
-		return False
+			_backup_saving(certs_dir, (cert_file_name, finalized_order.fullchain_pem), (privkey_file_name, privkey_pem.decode()), backup_time_format) # saving private key and certificate with backup
+
+			return True
+
+	except Exception as e:
+		logger.error(e)
+
+	return False
