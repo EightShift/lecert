@@ -76,7 +76,7 @@ def _backup_saving(certs_dir, cert_name_data, privkey_name_data, backup_time_for
 		with open(path, 'w') as _file:
 			_file.write(data)
 
-_backup_saving('./', ('cert_file_name', 'finalized_order.fullchain_pem'), ('privkey_file_name', 'privkey_pem.decode()'))
+
 def _select_http01_challb(auths):
 	for chall_body in auths.body.challenges:
 		if isinstance(chall_body.chall, challenges.HTTP01):
